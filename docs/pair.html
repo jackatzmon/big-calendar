@@ -1,16 +1,134 @@
 <!doctype html>
 <html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Big Calendar Pairing</title>
-  </head>
-  <body style="font-family: Arial; padding: 40px;">
-    <h1>Big Calendar Pairing Page</h1>
-    <p id="code"></p>
-    <script>
-      const p = new URLSearchParams(location.search);
-      document.getElementById("code").textContent = "Code: " + (p.get("code") || "(none)");
-    </script>
-  </body>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Pair Big Calendar</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; max-width: 760px; margin: 28px auto; padding: 16px; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin: 14px 0; }
+    button { padding: 10px 14px; font-size: 16px; cursor: pointer; }
+    input { width: 100%; padding: 10px; font-size: 16px; margin-top: 6px; }
+    small { color: #666; }
+    .toggle { display:flex; justify-content:space-between; align-items:center; padding: 10px; border:1px solid #eee; border-radius:10px; margin-top:10px; }
+    .err { color: #b00020; }
+    .ok { color: #0b6b0b; }
+  </style>
+</head>
+<body>
+  <h1>Connect calendars</h1>
+  <p id="pairingText"></p>
+  <p id="statusText"></p>
+
+  <div class="card">
+    <h2>Google Calendar</h2>
+    <p><small>Device-code pairing (TV-friendly).</small></p>
+    <button onclick="connectGoogle()">Connect Google</button>
+    <div id="googleStatus"></div>
+  </div>
+
+  <div class="card">
+    <h2>Apple iCloud Calendar</h2>
+    <p><small>Use an Apple <b>app-specific password</b>.</small></p>
+    <label>Apple ID email</label>
+    <input id="icloudEmail" type="email" placeholder="name@icloud.com" />
+    <label>App-specific password</label>
+    <input id="icloudPass" type="password" placeholder="xxxx-xxxx-xxxx-xxxx" />
+    <button onclick="connectIcloud()">Connect iCloud</button>
+    <div id="icloudStatus"></div>
+  </div>
+
+  <div class="card">
+    <h2>Calendar toggles</h2>
+    <p><small>Once calendars are connected, turn them on/off for the TV display.</small></p>
+    <div id="toggleList">No calendars yet.</div>
+    <button onclick="refreshCalendars()">Refresh calendars</button>
+  </div>
+
+<script>
+  const params = new URLSearchParams(location.search);
+  const pairingCode = (params.get("code") || "").toUpperCase();
+
+  const pairingText = document.getElementById("pairingText");
+  const statusText = document.getElementById("statusText");
+
+  pairingText.textContent =
+    pairingCode ? `Pairing code: ${pairingCode}` : "Missing pairing code in URL (?code=AB12)";
+
+  // ✅ Your Firebase Functions endpoint:
+  const API_BASE = "https://us-central1-big-calendar-1e6a8.cloudfunctions.net/api";
+
+  function setStatus(msg, ok=true) {
+    statusText.className = ok ? "ok" : "err";
+    statusText.textContent = msg;
+  }
+
+  async function connectGoogle() {
+    if (!pairingCode) return setStatus("Missing pairing code.", false);
+    const r = await fetch(`${API_BASE}/google/connect`, {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ pairingCode })
+    });
+    document.getElementById("googleStatus").textContent = await r.text();
+    await refreshCalendars();
+  }
+
+  async function connectIcloud() {
+    if (!pairingCode) return setStatus("Missing pairing code.", false);
+    const email = document.getElementById("icloudEmail").value.trim();
+    const password = document.getElementById("icloudPass").value.trim();
+    const r = await fetch(`${API_BASE}/icloud/connect`, {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ pairingCode, email, password })
+    });
+    document.getElementById("icloudStatus").textContent = await r.text();
+    await refreshCalendars();
+  }
+
+  async function refreshCalendars() {
+    if (!pairingCode) return;
+
+    const r = await fetch(`${API_BASE}/calendars/list?code=${encodeURIComponent(pairingCode)}`);
+    if (!r.ok) {
+      document.getElementById("toggleList").textContent = "Unable to load calendars yet.";
+      return;
+    }
+    const data = await r.json();
+
+    const el = document.getElementById("toggleList");
+    el.innerHTML = "";
+    if (!data.calendars.length) {
+      el.textContent = "No calendars found yet. Connect Google and/or iCloud first.";
+      return;
+    }
+
+    for (const c of data.calendars) {
+      const row = document.createElement("div");
+      row.className = "toggle";
+      row.innerHTML = `
+        <div>
+          <b>${c.name}</b><br/>
+          <small>${c.provider} • ${c.id}</small>
+        </div>
+        <label>
+          <input type="checkbox" ${c.enabled ? "checked":""}
+                 onchange="toggleCalendar('${c.id}', this.checked)" />
+          Enabled
+        </label>
+      `;
+      el.appendChild(row);
+    }
+    setStatus("Calendars loaded.", true);
+  }
+
+  async function toggleCalendar(calendarId, enabled) {
+    await fetch(`${API_BASE}/calendars/toggle`, {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ pairingCode, calendarId, enabled })
+    });
+  }
+
+  if (pairingCode) refreshCalendars();
+</script>
+</body>
 </html>
