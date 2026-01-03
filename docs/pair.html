@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Big Calendar Pairing</title>
+  </head>
+  <body style="font-family: Arial; padding: 40px;">
+    <h1>Big Calendar Pairing Page</h1>
+    <p id="code"></p>
+    <script>
+      const p = new URLSearchParams(location.search);
+      document.getElementById("code").textContent = "Code: " + (p.get("code") || "(none)");
+    </script>
+  </body>
+</html>
