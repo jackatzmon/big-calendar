@@ -1,134 +1,146 @@
 <!doctype html>
 <html>
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Pair Big Calendar</title>
-  <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; max-width: 760px; margin: 28px auto; padding: 16px; }
-    .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin: 14px 0; }
-    button { padding: 10px 14px; font-size: 16px; cursor: pointer; }
-    input { width: 100%; padding: 10px; font-size: 16px; margin-top: 6px; }
-    small { color: #666; }
-    .toggle { display:flex; justify-content:space-between; align-items:center; padding: 10px; border:1px solid #eee; border-radius:10px; margin-top:10px; }
-    .err { color: #b00020; }
-    .ok { color: #0b6b0b; }
-  </style>
-</head>
-<body>
-  <h1>Connect calendars</h1>
-  <p id="pairingText"></p>
-  <p id="statusText"></p>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Big Calendar Pairing</title>
+    <style>
+      body { font-family: Arial, sans-serif; padding: 24px; max-width: 720px; margin: 0 auto; }
+      .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; margin: 12px 0; }
+      input { width: 100%; padding: 12px; font-size: 16px; margin: 6px 0 12px; }
+      button { padding: 12px 16px; font-size: 16px; cursor: pointer; }
+      .row { display: flex; gap: 10px; align-items: center; }
+      .row > * { flex: 1; }
+      .muted { color: #666; }
+      .error { color: #b00020; }
+      .ok { color: #0a7a0a; }
+      code { background: #f6f6f6; padding: 2px 6px; border-radius: 6px; }
+    </style>
+  </head>
 
-  <div class="card">
-    <h2>Google Calendar</h2>
-    <p><small>Device-code pairing (TV-friendly).</small></p>
-    <button onclick="connectGoogle()">Connect Google</button>
-    <div id="googleStatus"></div>
-  </div>
+  <body>
+    <h1>Connect calendars</h1>
 
-  <div class="card">
-    <h2>Apple iCloud Calendar</h2>
-    <p><small>Use an Apple <b>app-specific password</b>.</small></p>
-    <label>Apple ID email</label>
-    <input id="icloudEmail" type="email" placeholder="name@icloud.com" />
-    <label>App-specific password</label>
-    <input id="icloudPass" type="password" placeholder="xxxx-xxxx-xxxx-xxxx" />
-    <button onclick="connectIcloud()">Connect iCloud</button>
-    <div id="icloudStatus"></div>
-  </div>
+    <div class="card">
+      <h2>Pairing code</h2>
+      <p class="muted">Enter the 4-letter code shown on your TV.</p>
+      <input id="codeInput" placeholder="e.g. M4XF" />
+      <div class="row">
+        <button id="useCodeBtn">Use code</button>
+        <button id="openWithCodeBtn">Open with code</button>
+      </div>
+      <p id="codeStatus" class="muted"></p>
+    </div>
 
-  <div class="card">
-    <h2>Calendar toggles</h2>
-    <p><small>Once calendars are connected, turn them on/off for the TV display.</small></p>
-    <div id="toggleList">No calendars yet.</div>
-    <button onclick="refreshCalendars()">Refresh calendars</button>
-  </div>
+    <div class="card">
+      <h2>Apple iCloud Calendar</h2>
+      <p class="muted">
+        Recommended: paste an iCloud <b>Public Calendar</b> link (ends in <code>.ics</code>). This is read-only.
+      </p>
+      <input id="icsUrl" placeholder="Paste iCloud public .ics link here" />
+      <button id="saveIcsBtn">Save iCloud .ics link</button>
+      <p id="icsStatus" class="muted"></p>
+    </div>
 
-<script>
-  const params = new URLSearchParams(location.search);
-  const pairingCode = (params.get("code") || "").toUpperCase();
+    <div class="card">
+      <h2>Status</h2>
+      <p id="status" class="muted">Not paired yet.</p>
+    </div>
 
-  const pairingText = document.getElementById("pairingText");
-  const statusText = document.getElementById("statusText");
+    <script>
+      // ---- config ----
+      const API_BASE = "https://us-central1-big-calendar-1e6a8.cloudfunctions.net/api";
 
-  pairingText.textContent =
-    pairingCode ? `Pairing code: ${pairingCode}` : "Missing pairing code in URL (?code=AB12)";
+      // ---- helpers ----
+      const qs = new URLSearchParams(location.search);
+      const el = (id) => document.getElementById(id);
 
-  // ✅ Your Firebase Functions endpoint:
-  const API_BASE = "https://us-central1-big-calendar-1e6a8.cloudfunctions.net/api";
+      function currentCode() {
+        const c = (el("codeInput").value || "").trim().toUpperCase();
+        return c;
+      }
 
-  function setStatus(msg, ok=true) {
-    statusText.className = ok ? "ok" : "err";
-    statusText.textContent = msg;
-  }
+      function setFromUrl() {
+        const fromUrl = (qs.get("code") || "").trim().toUpperCase();
+        if (fromUrl) {
+          el("codeInput").value = fromUrl;
+          el("codeStatus").textContent = "Code loaded from URL: " + fromUrl;
+        } else {
+          el("codeStatus").innerHTML = '<span class="error">Missing pairing code.</span> Enter the code from the TV above.';
+        }
+      }
 
-  async function connectGoogle() {
-    if (!pairingCode) return setStatus("Missing pairing code.", false);
-    const r = await fetch(`${API_BASE}/google/connect`, {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ pairingCode })
-    });
-    document.getElementById("googleStatus").textContent = await r.text();
-    await refreshCalendars();
-  }
+      async function getStatus() {
+        const code = currentCode();
+        if (!code) {
+          el("status").innerHTML = '<span class="error">Missing pairing code.</span>';
+          return;
+        }
+        try {
+          const r = await fetch(`${API_BASE}/pair/status?code=${encodeURIComponent(code)}`);
+          const txt = await r.text();
+          if (!r.ok) throw new Error(`HTTP ${r.status}: ${txt}`);
+          const data = JSON.parse(txt);
+          el("status").innerHTML = `<span class="ok">Paired:</span> ${data.status} — connected: ${(data.connectedProviders||[]).join(", ") || "none"}`;
+        } catch (e) {
+          el("status").innerHTML = `<span class="error">Error:</span> ${e.message}`;
+        }
+      }
 
-  async function connectIcloud() {
-    if (!pairingCode) return setStatus("Missing pairing code.", false);
-    const email = document.getElementById("icloudEmail").value.trim();
-    const password = document.getElementById("icloudPass").value.trim();
-    const r = await fetch(`${API_BASE}/icloud/connect`, {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ pairingCode, email, password })
-    });
-    document.getElementById("icloudStatus").textContent = await r.text();
-    await refreshCalendars();
-  }
+      async function saveIcs() {
+        const code = currentCode();
+        const url = (el("icsUrl").value || "").trim();
+        if (!code) {
+          el("icsStatus").innerHTML = '<span class="error">Missing pairing code.</span> Enter it above first.';
+          return;
+        }
+        if (!url) {
+          el("icsStatus").innerHTML = '<span class="error">Missing .ics link.</span>';
+          return;
+        }
+        try {
+          const r = await fetch(`${API_BASE}/calendars/icloud/add`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code, icsUrl: url })
+          });
+          const txt = await r.text();
+          if (!r.ok) throw new Error(`HTTP ${r.status}: ${txt}`);
+          el("icsStatus").innerHTML = `<span class="ok">Saved.</span> iCloud calendar link added.`;
+          await getStatus();
+        } catch (e) {
+          el("icsStatus").innerHTML = `<span class="error">Error:</span> ${e.message}`;
+        }
+      }
 
-  async function refreshCalendars() {
-    if (!pairingCode) return;
+      // ---- wire up ----
+      el("useCodeBtn").onclick = async () => {
+        const code = currentCode();
+        if (!code) {
+          el("codeStatus").innerHTML = '<span class="error">Enter the code.</span>';
+          return;
+        }
+        // Update URL without reloading
+        const newUrl = `${location.pathname}?code=${encodeURIComponent(code)}`;
+        history.replaceState({}, "", newUrl);
+        el("codeStatus").textContent = "Using code: " + code;
+        await getStatus();
+      };
 
-    const r = await fetch(`${API_BASE}/calendars/list?code=${encodeURIComponent(pairingCode)}`);
-    if (!r.ok) {
-      document.getElementById("toggleList").textContent = "Unable to load calendars yet.";
-      return;
-    }
-    const data = await r.json();
+      el("openWithCodeBtn").onclick = () => {
+        const code = currentCode();
+        if (!code) {
+          el("codeStatus").innerHTML = '<span class="error">Enter the code.</span>';
+          return;
+        }
+        location.href = `${location.pathname}?code=${encodeURIComponent(code)}`;
+      };
 
-    const el = document.getElementById("toggleList");
-    el.innerHTML = "";
-    if (!data.calendars.length) {
-      el.textContent = "No calendars found yet. Connect Google and/or iCloud first.";
-      return;
-    }
+      el("saveIcsBtn").onclick = saveIcs;
 
-    for (const c of data.calendars) {
-      const row = document.createElement("div");
-      row.className = "toggle";
-      row.innerHTML = `
-        <div>
-          <b>${c.name}</b><br/>
-          <small>${c.provider} • ${c.id}</small>
-        </div>
-        <label>
-          <input type="checkbox" ${c.enabled ? "checked":""}
-                 onchange="toggleCalendar('${c.id}', this.checked)" />
-          Enabled
-        </label>
-      `;
-      el.appendChild(row);
-    }
-    setStatus("Calendars loaded.", true);
-  }
-
-  async function toggleCalendar(calendarId, enabled) {
-    await fetch(`${API_BASE}/calendars/toggle`, {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ pairingCode, calendarId, enabled })
-    });
-  }
-
-  if (pairingCode) refreshCalendars();
-</script>
-</body>
+      // init
+      setFromUrl();
+      getStatus();
+    </script>
+  </body>
 </html>
